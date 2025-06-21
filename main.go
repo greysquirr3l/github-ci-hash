@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
@@ -64,14 +65,17 @@ func NewGitHubClient() *GitHubClient {
 	var client *github.Client
 
 	// Try to use GitHub token from environment
-	if token := getGitHubToken(); token != "" {
+	if token, source := getGitHubToken(); token != "" {
 		ts := oauth2.StaticTokenSource(&oauth2.Token{AccessToken: token})
 		tc := oauth2.NewClient(ctx, ts)
 		client = github.NewClient(tc)
+
+		// Show green status indicator for authenticated access
+		fmt.Printf("🟢 GitHub API: \033[32mAuthenticated\033[0m via %s (higher rate limits available)\n", source)
 	} else {
 		client = github.NewClient(nil)
-		fmt.Println("Warning: No GitHub token found. API rate limits will be lower.")
-		fmt.Println("Set GITHUB_TOKEN or GH_TOKEN environment variable for better rate limits.")
+		fmt.Printf("🟡 GitHub API: \033[33mUnauthenticated\033[0m (lower rate limits)\n")
+		fmt.Println("   Set GITHUB_TOKEN or GH_TOKEN environment variable, or authenticate with 'gh auth login'.")
 	}
 
 	return &GitHubClient{
@@ -80,14 +84,38 @@ func NewGitHubClient() *GitHubClient {
 	}
 }
 
-// getGitHubToken retrieves GitHub token from environment variables
-func getGitHubToken() string {
+// getGitHubToken retrieves GitHub token from environment variables or gh CLI
+func getGitHubToken() (string, string) {
+	// Try environment variables first
 	if token := os.Getenv("GITHUB_TOKEN"); token != "" {
-		return token
+		return token, "GITHUB_TOKEN"
 	}
 	if token := os.Getenv("GH_TOKEN"); token != "" {
+		return token, "GH_TOKEN"
+	}
+
+	// Try to get token from gh CLI if available
+	if token := getTokenFromGHCLI(); token != "" {
+		return token, "gh CLI"
+	}
+
+	return "", ""
+}
+
+// getTokenFromGHCLI attempts to get the GitHub token from gh CLI
+func getTokenFromGHCLI() string {
+	cmd := exec.Command("gh", "auth", "token")
+	output, err := cmd.Output()
+	if err != nil {
+		// gh CLI not available or not authenticated
+		return ""
+	}
+
+	token := strings.TrimSpace(string(output))
+	if token != "" {
 		return token
 	}
+
 	return ""
 }
 
@@ -292,6 +320,8 @@ func promptForConfirmation(message string) bool {
 }
 
 // updateWorkflowFile updates a workflow file with new action versions
+// This function is idempotent - it can be called multiple times safely
+// and will only make changes when actually needed
 func updateWorkflowFile(filename string, actions []ActionInfo) error {
 	content, err := os.ReadFile(filepath.Clean(filename))
 	if err != nil {
@@ -359,6 +389,10 @@ func updateWorkflowFile(filename string, actions []ActionInfo) error {
 }
 
 // updateActions updates the workflow files with new action versions
+// This function implements atomic update semantics:
+// - Creates backups before any modifications
+// - Rolls back changes if any operation fails
+// - Is idempotent and safe to retry
 func updateActions(actions WorkflowActions, targetWorkflow string) error {
 	fmt.Println("\n🚀 Updating workflow files...")
 
@@ -551,6 +585,102 @@ func verifyPinnedSHAs() error {
 	return nil
 }
 
+// installPreCommitHooks installs pre-commit hooks for the repository
+func installPreCommitHooks() error {
+	fmt.Println("🔧 Installing pre-commit hooks...")
+
+	// Check if we're in a git repository
+	if _, err := os.Stat(".git"); os.IsNotExist(err) {
+		return fmt.Errorf("not in a git repository (no .git directory found)")
+	}
+
+	// Create hooks directory if it doesn't exist
+	hooksDir := ".git/hooks"
+	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+		return fmt.Errorf("failed to create hooks directory: %w", err)
+	}
+
+	// Pre-commit hook script
+	preCommitHook := `#!/bin/sh
+# Pre-commit hook for github-ci-hash project
+set -e
+
+echo "🔍 Running pre-commit checks..."
+
+# Check if golangci-lint is available
+if ! command -v golangci-lint >/dev/null 2>&1; then
+    echo "❌ golangci-lint is not installed"
+    echo "   Install with: go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest"
+    exit 1
+fi
+
+# Run linting
+echo "🔍 Running golangci-lint..."
+if ! golangci-lint run; then
+    echo "❌ Linting failed"
+    exit 1
+fi
+
+# Run tests
+echo "🧪 Running tests..."
+if ! go test ./...; then
+    echo "❌ Tests failed"
+    exit 1
+fi
+
+# Verify all GitHub Actions are pinned to SHAs
+echo "🔒 Verifying GitHub Actions are pinned to SHAs..."
+if ! go run . verify >/dev/null 2>&1; then
+    echo "❌ Some GitHub Actions are not pinned to SHAs"
+    echo "   Run 'go run . verify' to see details"
+    exit 1
+fi
+
+echo "✅ All pre-commit checks passed!"
+`
+
+	// Write pre-commit hook
+	preCommitPath := filepath.Join(hooksDir, "pre-commit")
+	if err := os.WriteFile(preCommitPath, []byte(preCommitHook), 0755); err != nil {
+		return fmt.Errorf("failed to write pre-commit hook: %w", err)
+	}
+
+	fmt.Printf("✅ Pre-commit hook installed at %s\n", preCommitPath)
+
+	// Pre-push hook script
+	prePushHook := `#!/bin/sh
+# Pre-push hook for github-ci-hash project
+set -e
+
+echo "🚀 Running pre-push checks..."
+
+# Check for GitHub Actions updates
+echo "🔍 Checking for GitHub Action updates..."
+if ! go run . check >/dev/null 2>&1; then
+    echo "⚠️  Warning: Could not check for GitHub Action updates"
+    echo "   This might be due to API rate limits or network issues"
+fi
+
+echo "✅ Pre-push checks completed!"
+`
+
+	// Write pre-push hook
+	prePushPath := filepath.Join(hooksDir, "pre-push")
+	if err := os.WriteFile(prePushPath, []byte(prePushHook), 0755); err != nil {
+		return fmt.Errorf("failed to write pre-push hook: %w", err)
+	}
+
+	fmt.Printf("✅ Pre-push hook installed at %s\n", prePushPath)
+
+	fmt.Println("\n🎉 Pre-commit hooks successfully installed!")
+	fmt.Println("\nThe following hooks are now active:")
+	fmt.Println("📋 pre-commit: Runs linting, tests, and SHA verification")
+	fmt.Println("🚀 pre-push: Checks for GitHub Action updates")
+	fmt.Println("\nTo bypass hooks (not recommended): git commit --no-verify")
+
+	return nil
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("GitHub CI Hash Updater")
@@ -561,10 +691,12 @@ func main() {
 		fmt.Println("  github-ci-hash update                   - Update all workflows (with confirmation)")
 		fmt.Println("  github-ci-hash update <workflow-file>   - Update specific workflow file")
 		fmt.Println("  github-ci-hash verify                   - Verify all actions are pinned to SHAs")
+		fmt.Println("  github-ci-hash install-hooks            - Install pre-commit hooks")
 		fmt.Println("  github-ci-hash version                  - Show version information")
 		fmt.Println("")
 		fmt.Println("Environment variables:")
 		fmt.Println("  GITHUB_TOKEN or GH_TOKEN - GitHub API token for higher rate limits")
+		fmt.Println("  (or authenticate with 'gh auth login' to use gh CLI token)")
 		os.Exit(1)
 	}
 
@@ -633,6 +765,12 @@ func main() {
 	case "verify":
 		if err := verifyPinnedSHAs(); err != nil {
 			fmt.Printf("Verification failed: %v\n", err)
+			os.Exit(1)
+		}
+
+	case "install-hooks":
+		if err := installPreCommitHooks(); err != nil {
+			fmt.Printf("Failed to install hooks: %v\n", err)
 			os.Exit(1)
 		}
 
