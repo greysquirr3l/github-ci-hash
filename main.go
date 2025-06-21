@@ -26,7 +26,7 @@ const (
 var (
 	// shaRegex is a compiled regex for matching 40-character SHA hashes
 	shaRegex = regexp.MustCompile(`^[a-f0-9]{40}$`)
-	
+
 	// Version information (set by build flags)
 	Version   = "dev"
 	GitCommit = "unknown"
