@@ -28,8 +28,11 @@ var (
 	shaRegex = regexp.MustCompile(`^[a-f0-9]{40}$`)
 
 	// Version information (set by build flags)
-	Version   = "dev"
+	// Version is the current version of the application
+	Version = "dev"
+	// GitCommit is the git commit hash the binary was built from
 	GitCommit = "unknown"
+	// BuildTime is the time when the binary was built
 	BuildTime = "unknown"
 )
 
