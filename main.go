@@ -596,7 +596,7 @@ func installPreCommitHooks() error {
 
 	// Create hooks directory if it doesn't exist
 	hooksDir := ".git/hooks"
-	if err := os.MkdirAll(hooksDir, 0755); err != nil {
+	if err := os.MkdirAll(hooksDir, 0750); err != nil {
 		return fmt.Errorf("failed to create hooks directory: %w", err)
 	}
 
@@ -641,6 +641,7 @@ echo "✅ All pre-commit checks passed!"
 
 	// Write pre-commit hook
 	preCommitPath := filepath.Join(hooksDir, "pre-commit")
+	// #nosec G306 - Git hooks must be executable (0755) to function properly
 	if err := os.WriteFile(preCommitPath, []byte(preCommitHook), 0755); err != nil {
 		return fmt.Errorf("failed to write pre-commit hook: %w", err)
 	}
@@ -666,6 +667,7 @@ echo "✅ Pre-push checks completed!"
 
 	// Write pre-push hook
 	prePushPath := filepath.Join(hooksDir, "pre-push")
+	// #nosec G306 - Git hooks must be executable (0755) to function properly
 	if err := os.WriteFile(prePushPath, []byte(prePushHook), 0755); err != nil {
 		return fmt.Errorf("failed to write pre-push hook: %w", err)
 	}
