@@ -30,53 +30,23 @@ linters:
   disable:
     - gochecknoinits
     - gochecknoglobals
-
-linters-settings:
-  errcheck:
-    check-type-assertions: true
-    check-blank: true
-  gocyclo:
-    min-complexity: 29
-  gosec:
-    excludes:
-      - G104 # Handled by errcheck
-  goconst:
-    min-len: 3
-    min-occurrences: 3
-  misspell:
-    locale: US
-  prealloc:
-    simple: true
-    range-loops: true
-    for-loops: false
-  dupl:
-    threshold: 150
-
-issues:
-  max-issues-per-linter: 0
-  max-same-issues: 0
-  exclude-rules:
-    - path: _test\.go
-      linters:
-        - errcheck
-        - gosec
-    - path: cmd/examples/
-      linters:
-        - errcheck
-    - path: internal/domain/
-      text: "exported.*should have comment.*or be unexported"
-      linters:
-        - revive
-    - path: pkg/
-      text: "exported.*should have comment.*or be unexported"
-      linters:
-        - revive
-    - text: "stutter"
-      linters:
-        - revive
-    - linters:
-        - gocritic
-      text: "hugeParam"
-    - text: "Id"
-      linters:
-        - revive
+  settings:
+    errcheck:
+      check-type-assertions: true
+      check-blank: true
+    gocyclo:
+      min-complexity: 29
+    gosec:
+      excludes:
+        - G104 # Handled by errcheck
+    goconst:
+      min-len: 3
+      min-occurrences: 3
+    misspell:
+      locale: US
+    prealloc:
+      simple: true
+      range-loops: true
+      for-loops: false
+    dupl:
+      threshold: 150
